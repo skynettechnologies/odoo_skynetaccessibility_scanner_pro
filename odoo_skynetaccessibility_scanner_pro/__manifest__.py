@@ -7,6 +7,8 @@
     'author': 'Skynet Technologies',
     'website': 'https://www.skynettechnologies.com',
     'license': 'LGPL-3',
+    'price': 90.00,
+    'currency': 'USD',
     'depends': ['base', 'web'],
     'data': [
         'models/skynetpro_scanner_model.xml',
