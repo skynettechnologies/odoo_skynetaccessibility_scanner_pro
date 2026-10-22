@@ -1,0 +1,1475 @@
+(function () {
+    if (typeof window.__skynetproScannerLoaded !== "undefined") {
+        if (typeof window.skynetproWaitAndInit === "function") window.skynetproWaitAndInit();
+        return;
+    }
+    window.__skynetproScannerLoaded = true;
+
+const SKYNET_BASE_URL   = "https://skynetaccessibilityscan.com";
+const REGISTER_API      = `${SKYNET_BASE_URL}/api/register-domain-platform`;
+const UPDATE_USER_API   = `${SKYNET_BASE_URL}/api/update-user`;
+const SCAN_DETAIL_API   = `${SKYNET_BASE_URL}/api/get-scan-detail`;
+const SCAN_COUNT_API    = `${SKYNET_BASE_URL}/api/get-scan-count`;
+const PACKAGES_LIST_API = `${SKYNET_BASE_URL}/api/packages-list`;
+const ACTION_LINK_API   = `${SKYNET_BASE_URL}/api/generate-plan-action-link`;
+
+const PLATFORM          = "OdooPro";
+const PRO_PLAN_SLUG     = "25-pages";     
+const PRO_PLAN_NAME     = "Small Site";
+const PRO_PLAN_ID       = "25";           
+const PRO_INTERVAL      = "Y";            
+const PRO_PRICE         = "90";           
+const SKYNET_REGISTER_KEY = "skynetproRegisterAttempted";
+
+const PLAN_ICONS = [
+    "/odoo_skynetaccessibility_scanner_pro/static/src/img/assets/diamond.svg",
+    "/odoo_skynetaccessibility_scanner_pro/static/src/img/assets/pentagon.svg",
+    "/odoo_skynetaccessibility_scanner_pro/static/src/img/assets/hexagon.svg",
+    "/odoo_skynetaccessibility_scanner_pro/static/src/img/assets/hexagon.svg",
+];
+
+const appData = {
+    domain:              "",
+    websiteUrl:          "",
+    websiteId:           "",
+    userId:              "",
+    userDataId:          "",
+    userDataName:        "",
+    userDataEmail:       "",
+    userDataCompany:     "",
+    userDataWebsite:     "",
+    dashboardLink:       "",
+    favIcon:             "",
+    urlScanStatus:       0,
+    scanStatus:          0,
+    totalPages:          0,
+    totalScanPages:      0,
+    totalSelectedPages:  0,
+    totalLastScanPages:  0,
+    lastUrlScan:         0,
+    lastScan:            null,
+    nextScanDate:        null,
+    scanViolationTotal:  "0",
+    successPercentage:   "0",
+    totalViolations:     0,
+    totalFailSum:        "",
+    packageId:           "",
+    packageName:         "",
+    pageViews:           "",
+    packagePrice:        "",
+    subscrInterval:      "",
+    endDate:             "",
+    cancelDate:          "",
+    paypalSubscrId:      "",
+    isTrialPeriod:       "",
+    isExpired:           "",
+    finalPrice:          0,
+    scanDetails:         {},
+    violationLink:       "#",
+    plans:               [],
+};
+
+window._skynetproBtnClick = function _skynetproBtnClick(action, e) {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+
+    function openDash() {
+        const url = (appData && appData.dashboardLink)
+            ? appData.dashboardLink
+            : "https://skynetaccessibilityscan.com/dashboard";
+        window.open(url, "_blank");
+    }
+
+    switch (action) {
+        case "free-activate":
+            openDash();
+            break;
+        case "cancel-sub":
+            if (window.confirm("Are you sure you want to cancel your subscription?")) openDash();
+            break;
+        case "expired-renew":
+        case "cancelled-renew":
+            openDash();
+            break;
+        case "view-violations": {
+            const link = (appData && appData.violationLink && appData.violationLink !== "#")
+                ? appData.violationLink
+                : ((appData && appData.dashboardLink) || "https://skynetaccessibilityscan.com/dashboard");
+            window.open(link, "_blank");
+            break;
+        }
+        case "back": {
+            const s1 = document.getElementById("skynetproSection1");
+            const s2 = document.getElementById("skynetproSection2");
+            if (s2) s2.style.display = "none";
+            if (s1) s1.style.display = "block";
+            window.scrollTo({ top: 0, behavior: "smooth" });
+            break;
+        }
+    }
+};
+
+window._skynetproTierClick = async function _skynetproTierClick(planId, actionType, interval, e) {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+
+    let action = actionType;
+
+    if (!appData || !appData.paypalSubscrId || appData.paypalSubscrId === "null" || appData.paypalSubscrId === "") {
+        action = "upgrade";
+    }
+
+    if (action === "cancel" && !window.confirm("Cancel your current plan?")) return;
+
+    const isTrial = !appData.paypalSubscrId
+                 || appData.paypalSubscrId === "null"
+                 || appData.paypalSubscrId === "";
+
+    if (isTrial) {
+        const newWindow = window.open("", "_blank");
+
+        const payload = {
+            website_id:         appData.websiteId,
+            current_package_id: appData.packageId || "",
+            action:             "upgrade",
+            package_id:         planId,
+            interval:           interval,
+        };
+
+        try {
+            const resp = await fetch(ACTION_LINK_API, {
+                method:  "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body:    new URLSearchParams(payload).toString(),
+            });
+
+            const data = await resp.json();
+
+            const redirectUrl = data.action_link
+                             || data.url
+                             || data.link
+                             || data.redirect_url
+                             || data.payment_url;
+
+            if (redirectUrl) {
+                newWindow.location.href = redirectUrl;
+            } else {
+                newWindow.close();
+                const autologinUrl = appData.dashboardLink || SKYNET_BASE_URL;
+                const finalUrl = autologinUrl.includes("?")
+                    ? `${autologinUrl}&redirect=/manage-plan`
+                    : `${autologinUrl}?redirect=/manage-plan`;
+                window.open(finalUrl, "_blank");
+            }
+        } catch (err) {
+            newWindow.close();
+            window.open(appData.dashboardLink || SKYNET_BASE_URL, "_blank");
+        }
+        return;
+    }
+
+    const newWindow = window.open("", "_blank");
+
+    const payload = {
+        website_id:         appData.websiteId,
+        current_package_id: appData.packageId,
+        action:             action,
+    };
+
+    if (action === "upgrade") {
+        payload.package_id = planId;
+        payload.interval   = interval;
+    }
+
+    try {
+        const resp = await fetch(ACTION_LINK_API, {
+            method:  "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body:    new URLSearchParams(payload).toString(),
+        });
+
+        const data = await resp.json();
+        const redirectUrl = data.action_link
+                         || data.url
+                         || data.link
+                         || data.redirect_url
+                         || data.payment_url;
+
+        if (redirectUrl) {
+            newWindow.location.href = redirectUrl;
+        } else {
+            newWindow.close();
+            window.open(appData.dashboardLink || SKYNET_BASE_URL, "_blank");
+        }
+    } catch (err) {
+        newWindow.close();
+        window.open(appData.dashboardLink || SKYNET_BASE_URL, "_blank");
+    }
+};
+
+/* ── Domain validation (same rules as the Wagtail module) ───────────── */
+const INVALID_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "0.0.0.0"]);
+
+function isInvalidDomain(hostname) {
+    if (!hostname) return true;
+    const h = String(hostname).trim().toLowerCase();
+    if (!h) return true;
+    if (INVALID_HOSTS.has(h)) return true;
+    if (h === "localhost" || h.endsWith(".localhost")) return true;
+    if (h.includes(":")) return true;                       // IPv6 / host:port
+    const ipv4 = h.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+    if (ipv4) {
+        const [, a, b] = ipv4.map(Number);
+        if (a === 10 || a === 127 || a === 0 ||
+            (a === 172 && b >= 16 && b <= 31) ||
+            (a === 192 && b === 168) ||
+            (a === 169 && b === 254)) return true;          // private / loopback / link-local
+    }
+    // Must look like a real hostname: labels separated by dots, valid TLD
+    if (!/^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(h)
+        && !ipv4) return true;
+    return false;
+}
+
+function showDomainError(message) {
+    stopScanPolling();
+    const loadingEl   = document.getElementById("skynetproLoading");
+    const section1    = document.getElementById("skynetproSection1");
+    const section2    = document.getElementById("skynetproSection2");
+    const errorBanner = document.getElementById("skynetproErrorBanner");
+    const errorMsg    = document.getElementById("skynetproErrorMsg");
+    if (loadingEl) loadingEl.style.display = "none";
+    if (section1)  section1.style.display  = "none";
+    if (section2)  section2.style.display  = "none";
+    if (errorMsg)  errorMsg.textContent    = message;
+    if (errorBanner) errorBanner.style.display = "block";
+}
+
+function b64EncodeUrl(url) {
+    try { return btoa(unescape(encodeURIComponent(url))); }
+    catch (e) { return btoa(url); }
+}
+
+function fmtDate(val) {
+    if (!val || val === "undefined" || val === "null") return "—";
+    const d = new Date(val);
+    if (isNaN(d)) return "—";
+    const months = ["January","February","March","April","May","June",
+                    "July","August","September","October","November","December"];
+    const day = d.getDate();        // ← removed UTC
+    return `${months[d.getMonth()]} ${day} ${d.getFullYear()}`;  // ← removed UTC
+}
+
+function getTodayStr() {
+    return new Date().toISOString().slice(0, 10);
+}
+
+function getRecordId() {
+    const h = window.location.hash.match(/[?&]id=(\d+)/);
+    if (h) return parseInt(h[1], 10);
+    const p = window.location.pathname.match(/\/(\d+)$/);
+    if (p) return parseInt(p[1], 10);
+    return null;
+}
+
+function isValidEmail(value) {
+    return typeof value === "string"
+        && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value.trim());
+}
+
+function resolveEmail(candidate, domain) {
+    return isValidEmail(candidate) ? candidate.trim() : `no-reply@${domain}`;
+}
+
+async function getOdooUserInfo(fallbackDomain) {
+    let uid = null, name = "", email = "", phone = "";
+    try {
+        const r = await fetch("/web/session/get_session_info", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ jsonrpc: "2.0", method: "call", params: {} }),
+        });
+        const d = await r.json();
+        const info = d?.result || {};
+        uid   = info.uid      || null;
+        name  = info.name     || "";
+        email = isValidEmail(info.username) ? info.username : "";
+    } catch (e) {}
+
+    if (uid) {
+        try {
+            const r = await fetch("/web/dataset/call_kw", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    jsonrpc: "2.0", method: "call",
+                    params: {
+                        model: "res.users", method: "search_read",
+                        args: [[["id", "=", uid]], ["name", "login", "email", "phone"]],
+                        kwargs: { limit: 1 },
+                    },
+                }),
+            });
+            const d = await r.json();
+            const u = (d?.result || [])[0] || {};
+            if (u.name)  name  = u.name;
+            if (isValidEmail(u.email)) email = u.email;
+            else if (isValidEmail(u.login)) email = u.login;
+            if (u.phone) phone = u.phone;
+        } catch (e) {}
+    }
+    return {
+        name:  name  || fallbackDomain,
+        email: resolveEmail(email, fallbackDomain),
+        phone: phone || "",
+    };
+}
+
+/* ── Email popup (no valid email registered on the domain) ─────────── */
+const SKYNET_EMAIL_DISMISS_KEY = "skynetproEmailPopupDismissed";
+
+function needsEmailRegistration() {
+    const email = (appData.userDataEmail || "").trim();
+    return !isValidEmail(email) || email.toLowerCase().startsWith("no-reply@");
+}
+
+function _skynetproGetModal() {
+    /* Remove stale copies moved to <body> by a previous form render */
+    const all = document.querySelectorAll("#skynetproEmailModal");
+    let modal = null;
+    all.forEach(function (el) {
+        if (!modal && document.getElementById("skynetproAppRoot") &&
+            (el.parentNode === document.body || document.getElementById("skynetproAppRoot").contains(el))) {
+            modal = el;
+        }
+    });
+    if (modal && modal.parentNode !== document.body) {
+        modal.setAttribute("data-skynetpro-moved", "1");
+        document.body.appendChild(modal);   /* escape transformed/overflow parents */
+    }
+    return modal;
+}
+
+function _skynetproResetEmailForm() {
+    ["skynetproRegName", "skynetproRegEmail"].forEach(function (id) {
+        const el = document.getElementById(id);
+        if (el) el.classList.remove("skynetpro-input-error");
+    });
+    ["skynetproEmailFormError", "skynetproEmailFormSuccess"].forEach(function (id) {
+        const el = document.getElementById(id);
+        if (el) el.style.display = "none";
+    });
+}
+
+function _skynetproHandleEmailPopup() {
+    const banner = document.getElementById("skynetproEmailBanner");
+    if (!needsEmailRegistration()) {
+        if (banner) banner.style.display = "none";
+        window._skynetproCloseEmailPopup();
+        return;
+    }
+    if (banner) banner.style.display = "flex";
+
+    const nameInput = document.getElementById("skynetproRegName");
+    if (nameInput && !nameInput.value && appData.userDataName &&
+        appData.userDataName !== appData.domain) {
+        nameInput.value = appData.userDataName;
+    }
+    let dismissed = false;
+    try { dismissed = sessionStorage.getItem(SKYNET_EMAIL_DISMISS_KEY) === "1"; } catch (e) {}
+    if (!dismissed) window._skynetproOpenEmailPopup();
+}
+
+window._skynetproOpenEmailPopup = function _skynetproOpenEmailPopup(e) {
+    if (e) e.preventDefault();
+    const modal = _skynetproGetModal();
+    if (!modal) return;
+    _skynetproResetEmailForm();
+    modal.style.display = "flex";
+    const emailInput = document.getElementById("skynetproRegEmail");
+    const nameInput  = document.getElementById("skynetproRegName");
+    setTimeout(function () {
+        const target = (nameInput && !nameInput.value) ? nameInput : emailInput;
+        if (target) target.focus();
+    }, 50);
+};
+
+window._skynetproCloseEmailPopup = function _skynetproCloseEmailPopup(e, remember) {
+    if (e) e.preventDefault();
+    const modal = document.getElementById("skynetproEmailModal");
+    if (modal) modal.style.display = "none";
+    if (remember) {
+        try { sessionStorage.setItem(SKYNET_EMAIL_DISMISS_KEY, "1"); } catch (err) {}
+    }
+};
+
+window._skynetproSaveEmail = async function _skynetproSaveEmail(e) {
+    if (e) e.preventDefault();
+
+    const nameInput  = document.getElementById("skynetproRegName");
+    const emailInput = document.getElementById("skynetproRegEmail");
+    const errEl      = document.getElementById("skynetproEmailFormError");
+    const okEl       = document.getElementById("skynetproEmailFormSuccess");
+    const saveBtn    = document.getElementById("skynetproRegSaveBtn");
+    const saveTxt    = document.getElementById("skynetproRegSaveBtnText");
+    const spinner    = document.getElementById("skynetproRegSaveSpinner");
+
+    _skynetproResetEmailForm();
+
+    const name  = (nameInput  && nameInput.value.trim())  || "";
+    const email = (emailInput && emailInput.value.trim()) || "";
+    let hasError = false;
+    if (!name)                 { nameInput  && nameInput.classList.add("skynetpro-input-error");  hasError = true; }
+    if (!isValidEmail(email))  { emailInput && emailInput.classList.add("skynetpro-input-error"); hasError = true; }
+    if (hasError) {
+        if (errEl) { errEl.textContent = "Please enter a valid name and email address."; errEl.style.display = "block"; }
+        return;
+    }
+
+    if (saveBtn) saveBtn.disabled = true;
+    if (saveTxt) saveTxt.textContent = "Saving…";
+    if (spinner) spinner.style.display = "inline-block";
+
+    try {
+        const resolvedUserId = appData.userId || appData.userDataId;
+        if (!resolvedUserId) {
+            throw new Error("Unable to retrieve user ID. Please refresh the page and try again.");
+        }
+        const domain = appData.domain || appData.websiteUrl;
+
+        const form = new FormData();
+        form.append("user_id",      String(resolvedUserId));
+        form.append("name",         name);
+        form.append("email",        email);
+        form.append("comapny_name", appData.userDataCompany || domain); /* API typo kept intentionally */
+        form.append("website",      appData.userDataWebsite || domain);
+
+        const resp = await fetch(UPDATE_USER_API, { method: "POST", body: form });
+        if (!resp.ok) {
+            let errMsg = `Update User API HTTP ${resp.status}`;
+            try {
+                const ej = await resp.json();
+                const raw = ej.msg || ej.message || ej.error || "";
+                if (typeof raw === "string" && raw) errMsg = raw;
+            } catch (_) {}
+            throw new Error(errMsg);
+        }
+        let json;
+        try { json = await resp.json(); }
+        catch (_) { throw new Error("Invalid response from Update User API"); }
+        if (String(json.status) !== "1") {
+            const raw = json.msg || json.message || json.error || "";
+            throw new Error((typeof raw === "string" && raw) ? raw : "Update failed. Please try again.");
+        }
+
+        appData.userDataEmail = email;
+        appData.userDataName  = name;
+        if (okEl) { okEl.textContent = "Email registered successfully!"; okEl.style.display = "block"; }
+        setTimeout(function () {
+            window._skynetproCloseEmailPopup();
+            const banner = document.getElementById("skynetproEmailBanner");
+            if (banner) banner.style.display = "none";
+        }, 1200);
+    } catch (err) {
+        let msg = "Update failed. Please try again.";
+        if (err instanceof Error)          msg = err.message || msg;
+        else if (typeof err === "string")  msg = err;
+        else if (err && typeof err === "object") msg = err.msg || err.message || err.error || JSON.stringify(err);
+        if (errEl) { errEl.textContent = msg; errEl.style.display = "block"; }
+    } finally {
+        if (saveBtn) saveBtn.disabled = false;
+        if (saveTxt) saveTxt.textContent = "Save";
+        if (spinner) spinner.style.display = "none";
+    }
+};
+
+document.addEventListener("keydown", function (ev) {
+    if (ev.key === "Escape") {
+        const m = document.getElementById("skynetproEmailModal");
+        if (m && m.style.display !== "none") window._skynetproCloseEmailPopup(null, true);
+    }
+});
+
+async function saveToOdoo(recordId, values) {
+    if (!recordId) return;
+    try {
+        await fetch("/web/dataset/call_kw", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                jsonrpc: "2.0", method: "call",
+                params: {
+                    model: "x_odoo_skynetaccessibility_scanner_pro",
+                    method: "write",
+                    args: [[recordId], values],
+                    kwargs: {},
+                },
+            }),
+        });
+    } catch (err) {}
+}
+
+function utcStamp(d) {
+    return d.toISOString().slice(0, 19).replace("T", " ");   // PHP gmdate('Y-m-d H:i:s')
+}
+
+function registerAttempted(domain) {
+    try { return sessionStorage.getItem(SKYNET_REGISTER_KEY) === domain; }
+    catch (e) { return false; }
+}
+
+async function hasStoredWebsiteId(recordId) {
+    if (!recordId) return false;
+    try {
+        const r = await fetch("/web/dataset/call_kw", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                jsonrpc: "2.0", method: "call",
+                params: {
+                    model: "x_odoo_skynetaccessibility_scanner_pro",
+                    method: "read",
+                    args: [[recordId], ["x_website_id"]],
+                    kwargs: {},
+                },
+            }),
+        });
+        const d  = await r.json();
+        const id = String(d?.result?.[0]?.x_website_id || "").trim();
+        return !!id && id !== "0" && id !== "undefined";
+    } catch (e) { return false; }
+}
+
+async function resolveProPlan(websiteUrl) {
+    const plan = {
+        id:    PRO_PLAN_ID,
+        slug:  PRO_PLAN_SLUG,
+        name:  PRO_PLAN_NAME,
+        price: PRO_PRICE,
+    };
+    try {
+        const resp = await fetch(PACKAGES_LIST_API, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ website: b64EncodeUrl(websiteUrl) }),
+        });
+        if (!resp.ok) return plan;
+        const json = await resp.json();
+        const list = json.Data || [];
+        const found =
+            list.find(p => String(p.slug || "").toLowerCase() === PRO_PLAN_SLUG) ||
+            list.find(p => String(p.name || "").toLowerCase() === PRO_PLAN_NAME.toLowerCase());
+        if (found) {
+            if (found.id)   plan.id   = String(found.id);
+            if (found.slug) plan.slug = String(found.slug);
+            if (found.name) plan.name = String(found.name);
+            const yearly  = found.price;
+            const monthly = found.monthly_price;
+            const chosen  = PRO_INTERVAL === "Y" ? yearly : monthly;
+            if (chosen !== undefined && chosen !== null && chosen !== "") {
+                plan.price = String(chosen);
+            }
+        }
+    } catch (e) {}
+    return plan;
+}
+
+async function registerDomain(websiteUrl, userInfo, domain, packageType, price) {
+    const start = new Date();
+    const end   = new Date(start.getTime());
+    if (PRO_INTERVAL === "Y") end.setUTCFullYear(end.getUTCFullYear() + 1);
+    else                      end.setUTCMonth(end.getUTCMonth() + 1);
+
+    const payload = {
+        website:         b64EncodeUrl(websiteUrl),
+        platform:        PLATFORM,
+        is_trial_period: "0",
+        name:            userInfo.name || domain,
+        email:           resolveEmail(userInfo.email, domain),
+        company_name:    domain,
+        package_type:    String(packageType),
+        start_date:      utcStamp(start),
+        end_date:        utcStamp(end),
+        subscr_interval: PRO_INTERVAL,
+        price:           String(price),
+        subscr_id:       "Odoo_" + start.toISOString().replace(/\.\d{3}Z$/, "Z"),
+    };
+    const resp = await fetch(REGISTER_API, {
+        method:  "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body:    new URLSearchParams(payload).toString(),
+    });
+    if (!resp.ok) throw new Error(`Register API HTTP ${resp.status}`);
+    const json = await resp.json();
+    if (String(json.status) !== "1") throw new Error(json.message || "Register failed");
+    return json;
+}
+
+/* Registers the domain on the Small Site paid plan and verifies the result.
+   Tries the slug first (the unique key of the packages table); if the backend
+   still activated a different plan, retries once with the numeric plan id. */
+async function registerProPlan(websiteUrl, userInfo, domain) {
+    const plan = await resolveProPlan(websiteUrl);
+    const candidates = [];
+    [plan.slug, plan.id].forEach(v => {
+        if (v && candidates.indexOf(String(v)) === -1) candidates.push(String(v));
+    });
+
+    let lastErr = null;
+    for (const pkgType of candidates) {
+        try {
+            await registerDomain(websiteUrl, userInfo, domain, pkgType, plan.price);
+            try { await fetchScanDetail(websiteUrl); } catch (e) {}
+            if (String(appData.packageId) === String(plan.id)) return true;
+            console.warn("[Skynet] package_type=" + pkgType + " activated '" +
+                appData.packageName + "' (id " + appData.packageId +
+                "), expected '" + plan.name + "' (id " + plan.id + ")");
+        } catch (e) {
+            lastErr = e;
+        }
+    }
+    if (lastErr) throw lastErr;
+    return false;
+}
+
+async function fetchScanDetail(websiteUrl) {
+    const form = new FormData();
+    form.append("website", b64EncodeUrl(websiteUrl));
+    const resp = await fetch(SCAN_DETAIL_API, { method: "POST", body: form });
+    if (!resp.ok) throw new Error(`Scan Detail API HTTP ${resp.status}`);
+    const json = await resp.json();
+
+    const data = (json.data || [])[0] || {};
+
+    appData.domain             = data.domain             || "";
+    appData.favIcon            = data.fav_icon           || "";
+    appData.urlScanStatus      = data.url_scan_status    || 0;
+    appData.scanStatus         = data.scan_status        || 0;
+    appData.totalSelectedPages = data.total_selected_pages  || 0;
+    appData.totalLastScanPages = data.total_last_scan_pages || 0;
+    appData.totalPages         = data.total_pages        || 0;
+    appData.lastUrlScan        = data.last_url_scan      || 0;
+    appData.totalScanPages     = data.total_scan_pages   || 0;
+    appData.lastScan           = data.last_scan          || null;
+    appData.nextScanDate       = data.next_scan_date     || null;
+    appData.successPercentage  = data.success_percentage || "0";
+    appData.scanViolationTotal = data.scan_violation_total || "0";
+    appData.totalViolations    = data.total_violations   || 0;
+    appData.packageName        = data.name               || "";
+    appData.packageId          = data.package_id         || "";
+    appData.pageViews          = data.page_views         || "";
+    appData.packagePrice       = data.package_price      || "";
+    appData.subscrInterval     = data.subscr_interval    || "";
+    appData.endDate            = data.end_date           || "";
+    appData.cancelDate         = data.cancel_date        || "";
+    appData.websiteId          = data.website_id         || "";
+    appData.paypalSubscrId     = data.paypal_subscr_id   || "";
+    appData.isTrialPeriod      = data.is_trial_period    || "";
+    appData.dashboardLink      = json.dashboard_link     || "";
+    appData.totalFailSum       = data.total_fail_sum     || "";
+    appData.isExpired          = data.is_expired         || "";
+    appData.userId             = data.user_id ? String(data.user_id) : appData.userId || "";
+
+    const ud = json.userData || {};
+    appData.userDataId      = ud.id           ? String(ud.id) : appData.userDataId   || "";
+    appData.userDataName    = ud.name         || appData.userDataName    || "";
+    appData.userDataEmail   = ud.email        || appData.userDataEmail   || "";
+    appData.userDataCompany = ud.company_name || appData.userDataCompany || "";
+    appData.userDataWebsite = ud.website      || appData.userDataWebsite || "";
+    if (!appData.userId && appData.userDataId) appData.userId = appData.userDataId;
+    return json;
+}
+
+async function fetchScanCount(websiteUrl) {
+    const form = new FormData();
+    form.append("website", b64EncodeUrl(websiteUrl));
+    const resp = await fetch(SCAN_COUNT_API, { method: "POST", body: form });
+    if (!resp.ok) throw new Error(`Scan Count API HTTP ${resp.status}`);
+    const json = await resp.json();
+
+    const widgetPurchased = json.widget_purchased || false;
+    const isBought = widgetPurchased === true || widgetPurchased === "true" || widgetPurchased == 1;
+    const sd = json.scan_details || {};
+    appData.scanDetails = isBought
+        ? (sd.with_remediation    || {})
+        : (sd.without_remediation || {});
+}
+
+async function fetchPackages(websiteUrl) {
+    const resp = await fetch(PACKAGES_LIST_API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ website: b64EncodeUrl(websiteUrl) }),
+    });
+    if (!resp.ok) throw new Error(`Packages API HTTP ${resp.status}`);
+    const decoded = await resp.json();
+
+    let packageData = {};
+    if (decoded.current_active_package?.[appData.websiteId]) {
+        packageData = decoded.current_active_package[appData.websiteId];
+    } else if (decoded.expired_package_detail?.[appData.websiteId]) {
+        packageData = decoded.expired_package_detail[appData.websiteId];
+    }
+    appData.finalPrice     = packageData.final_price    || 0;
+    appData.packageId      = packageData.package_id     || appData.packageId;
+    appData.subscrInterval = packageData.subscr_interval || appData.subscrInterval;
+
+    try {
+        const vResp = await fetch(ACTION_LINK_API, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({
+                website_id:         appData.websiteId,
+                current_package_id: appData.packageId,
+                action:             "violation",
+            }),
+        });
+        const vJson = await vResp.json();
+        appData.violationLink = vJson.action_link || vJson.url || "#";
+    } catch (e) {}
+
+    appData.plans = [];
+    const today  = getTodayStr();
+    for (const plan of (decoded.Data || [])) {
+        if (!plan.platforms || plan.platforms.toLowerCase() !== "scanner") continue;
+        const planId = plan.id;
+        if (!planId) continue;
+        let action = "upgrade";
+        if (String(planId) === String(appData.packageId)) {
+            plan.interval = appData.subscrInterval;
+            if (appData.endDate) {
+                const endOnly = appData.endDate.slice(0, 10);
+                action = today <= endOnly ? "cancel" : "upgrade";
+            } else {
+                action = "cancel";
+            }
+        }
+        plan.action = action;
+        appData.plans.push(plan);
+    }
+}
+
+function getPlanState() {
+    const today      = getTodayStr();
+    const endOnly    = appData.endDate   ? appData.endDate.slice(0, 10)   : null;
+    const cancelOnly = appData.cancelDate ? appData.cancelDate.slice(0, 10) : null;
+
+    const isExpired  = appData.isExpired == 1 || (endOnly && endOnly < today);
+    const isCancelled = cancelOnly && cancelOnly <= today && !isExpired;
+    const isTrial = appData.isTrialPeriod == 1;
+
+    if (isExpired)   return "expired";
+    if (isCancelled) return "cancelled";
+    if (isTrial)     return "free";
+    if (appData.packageId && !isTrial) return "purchased";
+    return "free";
+}
+
+function renderScanScore() {
+    const el = document.getElementById("skynetproScanScoreValue");
+    if (!el) return;
+
+    const today   = getTodayStr();
+    const endOnly = appData.endDate ? appData.endDate.slice(0, 10) : null;
+
+    const isExpired = appData.isExpired == 1 || (endOnly && endOnly < today);
+
+    if (isExpired) {
+        el.innerHTML = `<span class="skynetpro-score-na" style="color:#9F0000;font-size:2rem;font-weight:700;">N/A</span>`;
+    } else if (!appData.scanViolationTotal || appData.scanViolationTotal == 0) {
+        el.innerHTML = `<span class="status-inactive">N/A</span>`;
+    } else {
+        const pct = Math.round(parseFloat(appData.successPercentage)) || 0;
+        el.innerHTML = `
+            <div class="skynetpro-score-wrap" style="cursor:pointer;">
+                <span class="skynetpro-score-pct" style="color:#9F0000;font-weight:700;">${pct}%</span>
+                <div class="skynetpro-score-bar-track">
+                    <div class="skynetpro-score-bar-fill" style="width:${pct}%;"></div>
+                </div>
+                <div class="skynetpro-score-violations">
+                    Violations: <span style="font-size:15px;">${appData.totalFailSum}</span>
+                </div>
+            </div>`;
+    }
+}
+
+function getScannedPages() {
+    // Same logic as the Wagtail module: prefer the last-scan page count,
+    // fall back to the running total, then 0.
+    const raw   = appData.totalLastScanPages || appData.totalScanPages || 0;
+    const done  = parseInt(raw) || 0;
+    const total = parseInt(appData.totalSelectedPages) || 0;
+    return total > 0 ? Math.min(done, total) : done;
+}
+
+function isScanInProgress() {
+    const us = parseInt(appData.urlScanStatus) || 0;
+    const ss = parseInt(appData.scanStatus)    || 0;
+    return us >= 2 && (ss === 1 || ss === 2);
+}
+
+function stopScanPolling() {
+    if (window.__skynetproPollTimer) {
+        clearInterval(window.__skynetproPollTimer);
+        window.__skynetproPollTimer = null;
+    }
+}
+
+function startScanPolling() {
+    stopScanPolling();
+    if (!isScanInProgress()) return;
+    window.__skynetproPollTimer = setInterval(async () => {
+        if (!document.getElementById("skynetproLastScannedValue")) {
+            stopScanPolling();
+            return;
+        }
+        try {
+            const json = await fetchScanDetail(appData.websiteUrl);
+            console.debug("[Skynet] scan progress", json && json.data && json.data[0]);
+        } catch (e) {
+            return;
+        }
+        renderScanScore();
+        renderLastScanned();
+        renderViolationReport();
+        if (!isScanInProgress()) stopScanPolling();
+    }, 5000);
+}
+
+function renderLastScanned() {
+    const el = document.getElementById("skynetproLastScannedValue");
+    if (!el) return;
+
+    const us = parseInt(appData.urlScanStatus) || 0;
+    const ss = parseInt(appData.scanStatus)    || 0;
+
+    if (us < 2) {
+        el.innerHTML = `
+            <span class="status-inactive">
+                <img src="/odoo_skynetaccessibility_scanner_pro/static/src/img/assets/not-shared.svg"
+                     alt="" title="Not Started"
+                     style="height:16px;width:16px;vertical-align:middle;margin-right:4px;"
+                     onerror="this.style.display='none'">
+                Not Started
+            </span>`;
+    } else if (ss === 0) {
+        el.innerHTML = `
+            <span class="status-inactive">
+                <img src="/odoo_skynetaccessibility_scanner_pro/static/src/img/assets/not-shared.svg"
+                     alt="" title="Not Started"
+                     style="height:16px;width:16px;vertical-align:middle;margin-right:4px;"
+                     onerror="this.style.display='none'">
+                Not Started
+            </span>`;
+    } else if (ss === 1 || ss === 2) {
+        el.innerHTML = `
+            <span class="status-inactive">
+                <img src="/odoo_skynetaccessibility_scanner_pro/static/src/img/assets/not-shared.svg"
+                     alt="" title="Scanning in process"
+                     style="height:16px;width:16px;vertical-align:middle;margin-right:4px;"
+                     onerror="this.style.display='none'">
+                Scanning<br>${getScannedPages()}/${appData.totalSelectedPages}
+            </span>`;
+    } else if (ss >= 3) {
+        const dateStr = appData.lastScan ? fmtDate(appData.lastScan) : "";
+        el.innerHTML = `
+            <span class="status-active">
+                ${getScannedPages()} Pages<br>${dateStr}
+            </span>`;
+    } else {
+        el.innerHTML = `<span class="status-inactive">Not Started</span>`;
+    }
+}
+
+function renderPlanBanner(planState) {
+    ["skynetproPlanFree","skynetproPlanActive","skynetproPlanExpired","skynetproPlanCancelled"].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = "none";
+    });
+
+    switch (planState) {
+
+        case "free": {
+            const el = document.getElementById("skynetproPlanFree");
+            if (!el) break;
+
+            const nameEl  = document.getElementById("skynetproFreePlanName");
+            const pagesEl = document.getElementById("skynetproFreePlanPages");
+            const badgeEl = document.getElementById("skynetproFreePlanBadge");
+            const dateEl  = document.getElementById("skynetproFreeExpiry");
+            const btnEl   = document.getElementById("skynetproFreeActivateBtn");
+
+            if (nameEl)  nameEl.textContent  = "Free Plan";
+            if (pagesEl) pagesEl.textContent = `Scan up to ${appData.pageViews || appData.totalPages || 10} Pages`;
+            if (badgeEl) {
+                badgeEl.textContent      = "Current Plan";
+                badgeEl.style.color      = "green";
+                badgeEl.style.background = "#D1FFD3";
+            }
+            if (dateEl) {
+                dateEl.innerHTML = `<span style="color:#9F0000;">Expires on:</span> <strong>${fmtDate(appData.endDate)}</strong>`;
+            }
+            if (btnEl) {
+                btnEl.textContent           = "Activate Now";
+                btnEl.style.backgroundColor = "#420083";
+                btnEl.style.color           = "#fff";
+                btnEl.style.border          = "2px solid #420083";
+                btnEl.onclick = function(e) {
+                    e.preventDefault(); e.stopPropagation();
+                    window.open(appData.dashboardLink || `${SKYNET_BASE_URL}/dashboard`, "_blank");
+                };
+            }
+            el.style.display = "block";
+            break;
+        }
+
+        case "purchased": {
+            const el = document.getElementById("skynetproPlanActive");
+            if (!el) break;
+
+            const nameEl  = document.getElementById("skynetproActivePlanName");
+            const pagesEl = document.getElementById("skynetproActivePlanPages");
+            const badgeEl = document.getElementById("skynetproActivePlanBadge");
+            const dateEl  = document.getElementById("skynetproActiveRenewal");
+            const btnEl   = document.getElementById("skynetproCancelSubBtn");
+
+            if (nameEl)  nameEl.textContent  = appData.packageName ? `${appData.packageName} Plan` : "Active Plan";
+            if (pagesEl) pagesEl.textContent = `Scan up to ${appData.pageViews || appData.totalPages} Pages`;
+            if (badgeEl) {
+                badgeEl.textContent      = "Current Plan";
+                badgeEl.style.color      = "green";
+                badgeEl.style.background = "#D1FFD3";
+            }
+            if (dateEl) {
+                dateEl.innerHTML = `Renews on: <strong>${fmtDate(appData.endDate)}</strong>`;
+            }
+            if (btnEl) {
+                btnEl.textContent           = "Cancel Subscription";
+                btnEl.classList.add("cancel-sub-btn");
+                btnEl.style.backgroundColor = "";
+                btnEl.style.color           = "";
+                btnEl.style.border          = "";
+                btnEl.onclick = async function(e) {
+                    e.preventDefault(); e.stopPropagation();
+                    if (!confirm("Are you sure you want to cancel your subscription?")) return;
+
+                    const newWindow = window.open("", "_blank");
+
+                    const payload = {
+                        website_id:         appData.websiteId,
+                        current_package_id: appData.packageId,
+                        action:             "cancel",
+                    };
+
+                    try {
+                        const resp = await fetch(ACTION_LINK_API, {
+                            method:  "POST",
+                            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                            body:    new URLSearchParams(payload).toString(),
+                        });
+
+                        const data = await resp.json();
+
+                        const redirectUrl = data.action_link
+                                         || data.url
+                                         || data.link
+                                         || data.redirect_url
+                                         || data.payment_url;
+
+                        if (redirectUrl) {
+                            newWindow.location.href = redirectUrl;
+                        } else {
+                            newWindow.close();
+                            window.open(appData.dashboardLink || `${SKYNET_BASE_URL}/dashboard`, "_blank");
+                        }
+                    } catch (err) {
+                        newWindow.close();
+                        window.open(appData.dashboardLink || `${SKYNET_BASE_URL}/dashboard`, "_blank");
+                    }
+                };
+            }
+            el.style.display = "block";
+            break;
+        }
+
+        case "cancelled": {
+            const el = document.getElementById("skynetproPlanCancelled");
+            if (!el) break;
+
+            const nameEl  = document.getElementById("skynetproCancelledPlanName");
+            const pagesEl = document.getElementById("skynetproCancelledPlanPages");
+            const badgeEl = document.getElementById("skynetproCancelledPlanBadge");
+            const dateEl  = document.getElementById("skynetproCancelledExpiry");
+            const btnEl   = document.getElementById("skynetproRenewPlanBtn");
+
+            if (nameEl)  nameEl.textContent  = appData.packageName ? `${appData.packageName} Plan` : "Cancelled Plan";
+            if (pagesEl) pagesEl.textContent = `Scan up to ${appData.pageViews || appData.totalPages} Pages`;
+            if (badgeEl) {
+                badgeEl.textContent      = "Cancelled Plan";
+                badgeEl.style.color      = "#940000";
+                badgeEl.style.background = "#ffd1d1";
+            }
+            if (dateEl) {
+                dateEl.innerHTML = `<span style="color:#9F0000;">Expires on:</span> <strong>${fmtDate(appData.endDate)}</strong>`;
+            }
+            if (btnEl) {
+                btnEl.textContent           = "Renew Plan";
+                btnEl.style.backgroundColor = "#420083";
+                btnEl.style.color           = "#fff";
+                btnEl.style.border          = "2px solid #420083";
+                btnEl.onclick = function(e) {
+                    e.preventDefault(); e.stopPropagation();
+                    window.open(appData.dashboardLink || `${SKYNET_BASE_URL}/dashboard`, "_blank");
+                };
+            }
+            el.style.display = "block";
+            break;
+        }
+
+        case "expired": {
+            const el = document.getElementById("skynetproPlanExpired");
+            if (!el) break;
+
+            const titleEl = document.getElementById("skynetproExpiredTitle");
+            const dateEl  = document.getElementById("skynetproExpiredDate");
+            const btnEl   = document.getElementById("skynetproExpiredActivateBtn");
+
+            if (titleEl) {
+                titleEl.innerHTML = `<span style="color:#9F0000;font-weight:700;">Your Plan has Expired</span>`;
+            }
+            if (dateEl) {
+                dateEl.innerHTML = `Expired on: <strong>${fmtDate(appData.endDate)}</strong>`;
+            }
+            if (btnEl) {
+                btnEl.textContent           = "Renew Plan";
+                btnEl.style.backgroundColor = "#420083";
+                btnEl.style.color           = "#fff";
+                btnEl.style.border          = "2px solid #420083";
+                btnEl.onclick = function(e) {
+                    e.preventDefault(); e.stopPropagation();
+                    window.open(appData.dashboardLink || `${SKYNET_BASE_URL}/dashboard`, "_blank");
+                };
+            }
+            el.style.display = "block";
+            break;
+        }
+    }
+}
+
+function renderPlanCards(containerId, isAnnual) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = "";
+
+    if (!appData.plans.length) {
+        container.innerHTML = "<p>No plans available.</p>";
+        return;
+    }
+
+    const today      = getTodayStr();
+    const endOnly    = appData.endDate    ? appData.endDate.slice(0, 10)    : null;
+    const cancelOnly = appData.cancelDate ? appData.cancelDate.slice(0, 10) : null;
+    const isExpired  = appData.isExpired == 1 || (endOnly && endOnly < today);
+    const isTrial    = appData.isTrialPeriod == 1;
+    const isCancelled = cancelOnly && cancelOnly <= today && !isExpired;
+
+    appData.plans.forEach((plan, idx) => {
+        const icon     = PLAN_ICONS[idx] || PLAN_ICONS[PLAN_ICONS.length - 1];
+        const price    = isAnnual ? plan.price              : plan.monthly_price;
+        const oldPrice = isAnnual ? plan.strick_price       : plan.strick_monthly_price;
+        const label    = isAnnual ? "/Year"                 : "/Monthly";
+        const interval = isAnnual ? "Y"                     : "M";
+
+        const isCurrent = String(plan.id) === String(appData.packageId);
+        const planInterval = isAnnual ? "Y" : "M";
+        const isCurrentInterval = isCurrent && plan.interval === planInterval;
+        const isActiveCurrent = isCurrentInterval && !isCancelled && !isExpired && !isTrial;
+
+        let btnText   = "Upgrade";
+        let btnCls    = "upgrade-btn skynetpro-upgrade-btn";
+        let btnAction = "upgrade";
+
+        if (!isExpired && !isTrial && !isCancelled && isActiveCurrent && appData.paypalSubscrId) {
+            btnText   = "Cancel";
+            btnCls    = "upgrade-btn skynetpro-upgrade-btn skynetpro-cancel-tier-btn";
+            btnAction = "cancel";
+        }
+
+        const tier = document.createElement("div");
+        tier.className = "tier";
+        tier.dataset.planId = plan.id;
+        tier.innerHTML = `
+            <div class="pricing-top">
+                <div class="pricing-header">
+                    <div class="icon-circle">
+                        <img src="${icon}" alt="" height="20" width="20"/>
+                    </div>
+                    <div class="pricing-info">
+                        <p class="tier-title">${plan.name}</p>
+                        <p class="tier-pages">${plan.page_views} Pages</p>
+                    </div>
+                </div>
+            </div>
+            <hr class="pricing-divider"/>
+            <div class="pricing-body">
+                <p class="old-price">$${oldPrice}</p>
+                <p class="new-price">$${price}<span class="per-year">${label}</span></p>
+            </div>`;
+
+        const btn = document.createElement("button");
+        btn.type      = "button";
+        btn.className = btnCls;
+        btn.dataset.action   = btnAction;
+        btn.dataset.planId   = plan.id;
+        btn.dataset.interval = interval;
+        btn.textContent      = btnText;
+        btn.setAttribute("onclick", `window._skynetproTierClick('${plan.id}','${btnAction}','${interval}',event)`);
+        tier.appendChild(btn);
+        container.appendChild(tier);
+    });
+}
+
+function renderViolationReport() {
+    const reportDateEl = document.getElementById("skynetproS2ReportDate");
+    if (reportDateEl) {
+        reportDateEl.textContent = appData.lastScan ? fmtDate(appData.lastScan) : "—";
+    }
+
+    const pct = Math.round(parseFloat(appData.successPercentage)) || 0;
+    const scoreEl  = document.getElementById("skynetproS2ScoreValue");
+    const barEl    = document.getElementById("skynetproS2ScoreBar");
+    const statusEl = document.getElementById("skynetproS2StatusText");
+    if (scoreEl) scoreEl.textContent = `${pct}%`;
+    if (barEl)   barEl.style.width   = `${pct}%`;
+    if (statusEl) {
+        let cls = "not-compliant", text = "Not Compliant";
+        if      (pct >= 85) { cls = "compliant";      text = "Compliant"; }
+        else if (pct >= 50) { cls = "semi-compliant"; text = "Semi Compliant"; }
+        statusEl.textContent = text;
+        statusEl.className   = `status-text ${cls}`;
+    }
+
+    const pagesEl  = document.getElementById("skynetproS2PagesValue");
+    const pagesBar = document.getElementById("skynetproS2PagesBar");
+    const pagesNote = document.getElementById("skynetproS2PagesNote");
+    const pgPct = appData.totalPages > 0
+        ? Math.round(appData.totalScanPages / appData.totalPages * 100)
+        : 0;
+    if (pagesEl)  pagesEl.textContent    = appData.totalScanPages;
+    if (pagesBar) pagesBar.style.width   = `${pgPct}%`;
+    if (pagesNote) pagesNote.textContent = `${appData.totalScanPages} pages scanned out of ${appData.totalPages}`;
+
+    const sd = appData.scanDetails || {};
+    const failEl = document.getElementById("skynetproS2FailedChecks");
+    const passEl = document.getElementById("skynetproS2PassedChecks");
+    const naEl   = document.getElementById("skynetproS2NAChecks");
+    if (failEl) failEl.textContent = sd.total_fail    ?? 0;
+    if (passEl) passEl.textContent = sd.total_success ?? 0;
+    if (naEl)   naEl.textContent   = sd.severity_counts?.Not_Applicable ?? 0;
+
+    const crit   = sd.criteria_counts || {};
+    const lvlA   = document.getElementById("skynetproS2LevelA");
+    const lvlAA  = document.getElementById("skynetproS2LevelAA");
+    const lvlAAA = document.getElementById("skynetproS2LevelAAA");
+    if (lvlA)   lvlA.textContent   = crit.A   ?? 0;
+    if (lvlAA)  lvlAA.textContent  = crit.AA  ?? 0;
+    if (lvlAAA) lvlAAA.textContent = crit.AAA ?? 0;
+}
+
+async function handlePlanBtnClick(e) {
+    const btn = e.target.closest(".skynetpro-upgrade-btn");
+    if (!btn) return;
+
+    const action   = btn.dataset.action;
+    const planId   = btn.dataset.planId;
+    const interval = btn.dataset.interval;
+
+    window._skynetproTierClick(planId, action, interval, e);
+}
+
+window.initSkynetProScanner = async function initSkynetProScanner() {
+    const root        = document.getElementById("skynetproAppRoot");
+    if (!root) return;
+
+    /* drop orphaned popup copies left on <body> by a previous render */
+    document.querySelectorAll("body > #skynetproEmailModal[data-skynetpro-moved]").forEach(function (el) {
+        if (!root.contains(el)) el.remove();
+    });
+
+    const loadingEl   = document.getElementById("skynetproLoading");
+    const errorBanner = document.getElementById("skynetproErrorBanner");
+    const errorMsg    = document.getElementById("skynetproErrorMsg");
+    const section1    = document.getElementById("skynetproSection1");
+    const section2    = document.getElementById("skynetproSection2");
+
+    if (loadingEl)  loadingEl.style.display  = "flex";
+    if (section1)   section1.style.display   = "none";
+    if (section2)   section2.style.display   = "none";
+    if (errorBanner) errorBanner.style.display = "none";
+
+    let websiteUrl = window.location.origin;
+    try {
+        const r = await fetch("/web/dataset/call_kw", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                jsonrpc: "2.0", method: "call",
+                params: { model: "website", method: "search_read", args: [[], ["domain"]], kwargs: { limit: 1 } },
+            }),
+        });
+        const d    = await r.json();
+        const site = (d?.result || [])[0];
+        if (site?.domain) {
+            websiteUrl = site.domain.startsWith("http") ? site.domain : "https://" + site.domain;
+        }
+    } catch (e) {}
+
+    let domain = "";
+    try { domain = new URL(websiteUrl).hostname; }
+    catch (e) { domain = websiteUrl.replace(/^https?:\/\//, "").split("/")[0]; }
+
+    if (isInvalidDomain(domain)) {
+        showDomainError(
+            `"${domain}" is not a valid domain. ` +
+            `Localhost and private IP addresses cannot be scanned. ` +
+            `Please deploy your site to a public domain and access the scanner from there.`
+        );
+        return;
+    }
+
+    appData.websiteUrl = websiteUrl;
+    appData.domain     = domain;
+
+    const recordId = getRecordId();
+
+    const userInfo = await getOdooUserInfo(domain);
+
+    /* First install: the domain is not known to the backend yet, so calling
+       get-scan-detail first would always return 400. Odoo stores the backend
+       website id after the first successful sync; if it is missing, register
+       the Small Site plan FIRST, then read the scan detail. */
+    const hasStoredId = await hasStoredWebsiteId(recordId);
+    if (!hasStoredId && !registerAttempted(domain)) {
+        try { sessionStorage.setItem(SKYNET_REGISTER_KEY, domain); } catch (e) {}
+        try {
+            await registerProPlan(websiteUrl, userInfo, domain);
+        } catch (e) {
+            try { sessionStorage.removeItem(SKYNET_REGISTER_KEY); } catch (_) {}
+        }
+    }
+
+    try {
+        await fetchScanDetail(websiteUrl);
+    } catch (e) {}
+
+    /* Domain known to the backend but still on a trial / no paid package:
+       upgrade it to the paid plan (at most one attempt per browser session). */
+    const alreadyPaid = !!appData.websiteId && appData.isTrialPeriod != 1;
+    if (!alreadyPaid && !registerAttempted(domain)) {
+        try { sessionStorage.setItem(SKYNET_REGISTER_KEY, domain); } catch (e) {}
+        try {
+            await registerProPlan(websiteUrl, userInfo, domain);
+        } catch (e) {
+            try { sessionStorage.removeItem(SKYNET_REGISTER_KEY); } catch (_) {}
+        }
+    }
+
+    try {
+        await fetchScanCount(websiteUrl);
+    } catch (e) {}
+
+    try {
+        await fetchPackages(websiteUrl);
+    } catch (e) {}
+
+    const planState = getPlanState();
+
+    if (recordId) {
+        const today = getTodayStr();
+        const endOnly = appData.endDate ? appData.endDate.slice(0, 10) : null;
+        const isExpiredCalc = appData.isExpired == 1 || (endOnly && endOnly < today);
+        const cancelOnly = appData.cancelDate ? appData.cancelDate.slice(0, 10) : null;
+        const isCancelledCalc = !!(cancelOnly && cancelOnly <= today && !isExpiredCalc);
+
+        await saveToOdoo(recordId, {
+            x_website_domain:        domain,
+            x_website_id:            String(appData.websiteId),
+            x_dashboard_link:        appData.dashboardLink,
+            x_fav_icon:              appData.favIcon,
+            x_scan_status:           appData.scanStatus,
+            x_url_scan_status:       appData.urlScanStatus,
+            x_total_pages:           appData.totalPages,
+            x_total_scan_pages:      appData.totalScanPages,
+            x_total_selected_pages:  appData.totalSelectedPages,
+            x_total_last_scan_pages: appData.totalLastScanPages,
+            x_last_url_scan:         appData.lastUrlScan,
+            x_last_scan:             appData.lastScan || false,
+            x_next_scan_date:        appData.nextScanDate || false,
+            x_success_percentage:    parseFloat(appData.successPercentage) || 0,
+            x_total_violations:      appData.totalViolations,
+            x_total_fail:            parseInt(appData.totalFailSum) || 0,
+            x_is_expired:            isExpiredCalc,
+            x_is_cancelled:          isCancelledCalc,
+            x_is_trial_period:       appData.isTrialPeriod == 1,
+            x_package_name:          appData.packageName,
+            x_package_id_ext:        String(appData.packageId),
+            x_page_views:            String(appData.pageViews),
+            x_subscr_interval:       appData.subscrInterval,
+            x_end_date:              endOnly || false,
+            x_cancel_date:           cancelOnly || false,
+            x_paypal_subscr_id:      appData.paypalSubscrId,
+            x_package_price:         String(appData.packagePrice),
+            x_final_price:           appData.finalPrice,
+            x_plans_json:            JSON.stringify(appData.plans),
+            x_active_view:           "main",
+        });
+    }
+
+    renderScanScore();
+    renderLastScanned();
+    renderPlanBanner(planState);
+    renderPlanCards("skynetproMonthlyTiers", false);
+    renderPlanCards("skynetproAnnualTiers",  true);
+    renderViolationReport();
+    startScanPolling();
+
+    /* Show email popup when the registered domain has no valid email */
+    _skynetproHandleEmailPopup();
+
+    const billingWrapper   = document.getElementById("skynetproBillingToggleWrapper");
+    const billingSlider    = document.getElementById("skynetproBillingSlider");
+    const monthlyLabel     = document.getElementById("monthly-label");
+    const annualLabel      = document.getElementById("annual-label");
+    const monthlyContainer = document.getElementById("skynetproMonthlyTiers");
+    const annualContainer  = document.getElementById("skynetproAnnualTiers");
+
+    let billingToggle = document.getElementById("billing-toggle");
+    if (!billingToggle && billingWrapper) {
+        billingToggle = document.createElement("input");
+        billingToggle.type = "checkbox";
+        billingToggle.id   = "billing-toggle";
+        billingToggle.style.cssText = "position:absolute;opacity:0;width:0;height:0;";
+        billingWrapper.appendChild(billingToggle);
+    }
+
+    const showMonthly = () => {
+        if (billingToggle) billingToggle.checked = false;
+        if (billingSlider) billingSlider.classList.remove("active");
+        monthlyLabel?.classList.add("active");
+        annualLabel?.classList.remove("active");
+        if (monthlyContainer) monthlyContainer.style.display = "grid";
+        if (annualContainer)  annualContainer.style.display  = "none";
+    };
+    const showAnnual = () => {
+        if (billingToggle) billingToggle.checked = true;
+        if (billingSlider) billingSlider.classList.add("active");
+        monthlyLabel?.classList.remove("active");
+        annualLabel?.classList.add("active");
+        if (monthlyContainer) monthlyContainer.style.display = "none";
+        if (annualContainer)  annualContainer.style.display  = "grid";
+    };
+
+    if (appData.subscrInterval === "Y") showAnnual(); else showMonthly();
+
+    billingToggle?.addEventListener("change", () => {
+        billingToggle.checked ? showAnnual() : showMonthly();
+    });
+    billingSlider?.addEventListener("click", () => {
+        if (billingToggle) {
+            billingToggle.checked = !billingToggle.checked;
+            billingToggle.checked ? showAnnual() : showMonthly();
+        }
+    });
+    monthlyLabel?.addEventListener("click", showMonthly);
+    annualLabel?.addEventListener("click",  showAnnual);
+
+    if (monthlyContainer) {
+        monthlyContainer.removeEventListener("click", handlePlanBtnClick);
+        monthlyContainer.addEventListener("click", handlePlanBtnClick);
+    }
+    if (annualContainer) {
+        annualContainer.removeEventListener("click", handlePlanBtnClick);
+        annualContainer.addEventListener("click", handlePlanBtnClick);
+    }
+
+    if (document.__skynetproDelegate) {
+        document.removeEventListener("click", document.__skynetproDelegate);
+    }
+    document.__skynetproDelegate = function skynetproDelegate(e) {
+
+            if (e.target.closest("#skynetproScanScoreCard")) {
+                const s1 = document.getElementById("skynetproSection1");
+                const s2 = document.getElementById("skynetproSection2");
+                const hasViolations = appData.scanViolationTotal && appData.scanViolationTotal != 0;
+                const isExpiredNow  = appData.isExpired == 1 ||
+                    (appData.endDate && appData.endDate.slice(0, 10) < getTodayStr());
+                if (hasViolations && !isExpiredNow) {
+                    if (s1) s1.style.display = "none";
+                    if (s2) s2.style.display = "block";
+                    window.scrollTo({ top: 0, behavior: "smooth" });
+                }
+                return;
+            }
+
+            if (e.target.closest("#skynetproBackBtn")) {
+                const s1 = document.getElementById("skynetproSection1");
+                const s2 = document.getElementById("skynetproSection2");
+                if (s2) s2.style.display = "none";
+                if (s1) s1.style.display = "block";
+                window.scrollTo({ top: 0, behavior: "smooth" });
+                return;
+            }
+
+            if (e.target.closest("#skynetproS2ViewViolationsBtn")) {
+                const link = appData.violationLink && appData.violationLink !== "#"
+                    ? appData.violationLink
+                    : (appData.dashboardLink || `${SKYNET_BASE_URL}/dashboard`);
+                window.open(link, "_blank");
+                return;
+            }
+
+            if (e.target.closest("#skynetproFreeActivateBtn")) {
+                window.open(appData.dashboardLink || `${SKYNET_BASE_URL}/dashboard`, "_blank");
+                return;
+            }
+
+            if (e.target.closest("#skynetproCancelSubBtn")) {
+                return;
+            }
+
+            if (e.target.closest("#skynetproRenewPlanBtn")) {
+                window.open(appData.dashboardLink || `${SKYNET_BASE_URL}/dashboard`, "_blank");
+                return;
+            }
+
+            if (e.target.closest("#skynetproExpiredActivateBtn")) {
+                window.open(appData.dashboardLink || `${SKYNET_BASE_URL}/dashboard`, "_blank");
+                return;
+            }
+
+            const tierBtn = e.target.closest(".skynetpro-upgrade-btn");
+            if (tierBtn) {
+                handlePlanBtnClick(e);
+                return;
+            }
+    };
+    document.addEventListener("click", document.__skynetproDelegate);
+
+    if (loadingEl)  loadingEl.style.display  = "none";
+    if (section1)   section1.style.display   = "block";
+}
+
+window.skynetproWaitAndInit = function skynetproWaitAndInit() {
+    if (document.getElementById("skynetproAppRoot")) {
+        initSkynetProScanner();
+        return;
+    }
+    const obs = new MutationObserver(() => {
+        if (document.getElementById("skynetproAppRoot")) {
+            obs.disconnect();
+            setTimeout(initSkynetProScanner, 300);
+        }
+    });
+    obs.observe(document.body, { childList: true, subtree: true });
+}
+
+if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", skynetproWaitAndInit);
+    } else {
+        skynetproWaitAndInit();
+    }
+
+})();
